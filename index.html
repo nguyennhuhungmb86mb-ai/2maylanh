@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <title>Điều khiển Máy lạnh Funiki</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --muted: #94a3b8;
+      --green: #22c55e; --red: #ef4444; --blue: #3b82f6; --purple: #8b5cf6;
+      --orange: #f97316; --teal: #14b8a6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; padding: 24px 16px;
+    }
+    h1 { margin: 0 0 12px; font-size: 1.5rem; }
+    .tabs {
+      display: flex; gap: 8px; margin-bottom: 20px;
+      background: var(--card); padding: 4px; border-radius: 12px;
+    }
+    .tab-btn {
+      background: transparent; border: none; color: var(--muted);
+      padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer;
+    }
+    .tab-btn.active { background: var(--blue); color: white; }
+    .status {
+      font-size: 0.9rem; color: var(--muted); margin-bottom: 24px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; }
+    .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.offline { background: var(--red); }
+    .card {
+      background: var(--card); border-radius: 20px; padding: 24px;
+      width: 100%; max-width: 380px; box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+    }
+    .temp-box { text-align: center; margin-bottom: 24px; }
+    .temp-value { font-size: 4.5rem; font-weight: 700; line-height: 1; }
+    .temp-unit { font-size: 1.8rem; vertical-align: super; }
+    .mode-label { margin-top: 8px; color: var(--muted); font-size: 0.95rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    button.control-btn {
+      border: none; border-radius: 14px; padding: 16px 12px;
+      font-size: 1rem; font-weight: 600; color: white; cursor: pointer;
+    }
+    button.control-btn:active { transform: scale(0.96); }
+    .btn-on   { background: var(--green); }
+    .btn-off  { background: var(--red); }
+    .btn-temp { background: var(--blue); }
+    .btn-mode { background: var(--purple); }
+    .btn-fan  { background: var(--orange); }
+    .btn-extra{ background: var(--teal); }
+    .full { grid-column: span 2; }
+    .section-title { grid-column: span 2; font-size: 0.85rem; color: var(--muted); margin: 8px 0 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>Điều khiển Máy lạnh</h1>
+  
+  <div class="tabs">
+    <button class="tab-btn active" id="btnPhongNgu" onclick="switchRoom('phongngu')">Phòng Ngủ</button>
+    <button class="tab-btn" id="btnPhongKhach" onclick="switchRoom('phongkhach')">Phòng Khách</button>
+  </div>
+
+  <div class="status">
+    <div class="dot" id="dot"></div>
+    <span id="statusText">Đang kết nối...</span>
+  </div>
+
+  <div class="card">
+    <div class="temp-box">
+      <div>
+        <span class="temp-value" id="temp">--</span>
+        <span class="temp-unit">°C</span>
+      </div>
+      <div class="mode-label" id="modeLabel">Chưa có dữ liệu</div>
+    </div>
+
+    <div class="grid">
+      <button class="control-btn btn-on"  onclick="send('on')">Bật</button>
+      <button class="control-btn btn-off" onclick="send('off')">Tắt</button>
+      <button class="control-btn btn-temp" onclick="send('tempup')">Nhiệt độ +</button>
+      <button class="control-btn btn-temp" onclick="send('tempdown')">Nhiệt độ −</button>
+      <button class="control-btn btn-mode" onclick="send('cool')">Làm lạnh</button>
+      <button class="control-btn btn-mode" onclick="send('dry')">Hút ẩm</button>
+      <button class="control-btn btn-mode" onclick="send('fan')">Quạt</button>
+      <button class="control-btn btn-mode" onclick="send('auto')">Tự động</button>
+      <button class="control-btn btn-mode full" onclick="send('heat')">Sưởi</button>
+      <div class="section-title">Tốc độ quạt</div>
+      <button class="control-btn btn-fan" onclick="send('fanauto')">Quạt Auto</button>
+      <button class="control-btn btn-fan" onclick="send('fanlow')">Quạt Thấp</button>
+      <button class="control-btn btn-fan" onclick="send('fanmed')">Quạt TB</button>
+      <button class="control-btn btn-fan" onclick="send('fanhigh')">Quạt Cao</button>
+      <div class="section-title">Khác</div>
+      <button class="control-btn btn-extra" onclick="send('swing')">Cánh gió (Swing)</button>
+      <button class="control-btn btn-extra" onclick="send('clean')">Tự làm sạch</button>
+    </div>
+  </div>
+
+  <script>
+    const topics = {
+      phongngu: {
+        control: "dcnguyen/funiki/phongngu/control",
+        status: "dcnguyen/funiki/phongngu/status"
+      },
+      phongkhach: {
+        control: "dcnguyen/funiki/phongkhach/control",
+        status: "dcnguyen/funiki/phongkhach/status"
+      }
+    };
+
+    let currentRoom = 'phongngu';
+    const states = { phongngu: {}, phongkhach: {} };
+
+    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", {
+      clientId: "web-funiki-" + Math.random().toString(16).substr(2, 8),
+      clean: true
+    });
+
+    const modeNames = { 0: "Làm lạnh", 1: "Hút ẩm", 2: "Tự động", 3: "Sưởi", 4: "Quạt" };
+    const fanNames = { 0: "Auto0", 1: "Cao", 2: "Trung bình", 4: "Thấp", 5: "Auto", 6: "Zone Follow", 7: "Cố định" };
+
+    client.on("connect", () => {
+      document.getElementById("dot").className = "dot online";
+      document.getElementById("statusText").textContent = "Đã kết nối";
+      client.subscribe(topics.phongngu.status);
+      client.subscribe(topics.phongkhach.status);
+    });
+
+    client.on("close", () => { document.getElementById("dot").className = "dot offline"; document.getElementById("statusText").textContent = "Mất kết nối"; });
+
+    client.on("message", (topic, payload) => {
+      try {
+        const data = JSON.parse(payload.toString());
+        let room = (topic === topics.phongngu.status) ? 'phongngu' : 'phongkhach';
+        states[room] = data;
+        if (currentRoom === room) updateUI(data);
+      } catch (e) {}
+    });
+
+    function updateUI(data) {
+      document.getElementById("temp").textContent = data.temp ?? "--";
+      let modeText = modeNames[data.mode] || `Mode ${data.mode}`;
+      if (data.power === "off") {
+        modeText = "Đã tắt";
+      } else {
+        const fanText = fanNames[data.fan] || data.fan;
+        modeText += ` • Quạt: ${fanText}`;
+        if (data.swing === "on") modeText += " • Swing";
+        if (data.clean === "on") modeText += " • Clean";
+      }
+      document.getElementById("modeLabel").textContent = modeText;
+    }
+
+    function switchRoom(room) {
+      currentRoom = room;
+      document.getElementById("btnPhongNgu").className = (room === 'phongngu') ? "tab-btn active" : "tab-btn";
+      document.getElementById("btnPhongKhach").className = (room === 'phongkhach') ? "tab-btn active" : "tab-btn";
+      updateUI(states[room] || {});
+    }
+
+    function send(cmd) {
+      if (!client.connected) { alert("Chưa kết nối MQTT!"); return; }
+      client.publish(topics[currentRoom].control, cmd);
+    }
+  </script>
+</body>
+</html>
